@@ -1,11 +1,20 @@
-[phases.build]
-dependsOn = ["install"]
+[providers]
+python = "3.11"
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+dependsOn = []
+cmds = [
+    "apt-get update && apt-get install -y gcc g++ libffi-dev libssl-dev",
+    "pip install --upgrade pip setuptools wheel",
+    "pip install -r requirements.txt"
+]
+
+[phases.build]
+dependsOn = ["install"]
 
 [start]
 cmd = "uvicorn main:app --host 0.0.0.0 --port $PORT"
 
 [variables]
-NIXPACKS_PYTHON_VERSION = "3.11"
+PYTHONUNBUFFERED = "1"
+PORT = "8000"
