@@ -1,0 +1,11 @@
+[phases.build]
+dependsOn = ["install"]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[start]
+cmd = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.11"
