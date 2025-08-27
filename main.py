@@ -15,6 +15,12 @@ from io import BytesIO
 from PIL import Image
 import uuid
 from typing import Dict, Any
+import gc  # For garbage collection
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="String Art API", description="Generate string art from images")
 
@@ -134,7 +140,7 @@ def create_art(nails, orig_pic, str_pic, str_strength, i_limit=None, random_nail
         i += 1
         
         if i%500 == 0:
-            print(f"Iteration {i}")
+            logger.info(f"Iteration {i}")
         
         if i_limit == None:
             if fails >= 3:
@@ -158,9 +164,9 @@ def create_art(nails, orig_pic, str_pic, str_strength, i_limit=None, random_nail
         current_position = best_nail_position
         iter_times.append(time() - start_iter)
 
-    print(f"Time: {time() - start}")
-    print(f"Avg iteration time: {np.mean(iter_times) if iter_times else 0}")
-    print(f"DEBUG create_art: Returning pull_order with {len(pull_order)} pulls")
+    logger.info(f"Time: {time() - start}")
+    logger.info(f"Avg iteration time: {np.mean(iter_times) if iter_times else 0}")
+    logger.info(f"DEBUG create_art: Returning pull_order with {len(pull_order)} pulls")
     return pull_order
 
 def scale_nails(x_ratio, y_ratio, nails):
@@ -179,7 +185,7 @@ def process_single_contrast(orig_pic, nails, shape, contrast_label, image_dimens
                           wb=False, pull_amount=None, export_strength=0.1, random_nails=None,
                           radius1_multiplier=1, radius2_multiplier=1):
     """Process a single contrast level and return the result"""
-    print(f"\n=== Processing {contrast_label} contrast ===")
+    logger.info(f"=== Processing {contrast_label} contrast ===")
     
     if wb:
         str_pic = init_canvas(shape, black=True)
@@ -208,32 +214,36 @@ def process_single_contrast(orig_pic, nails, shape, contrast_label, image_dimens
 # ============== API WRAPPER CODE ==============
 
 def numpy_to_base64(image_array):
-    """Convert numpy array to base64 encoded PNG string"""
-    # Create a BytesIO buffer
+    """Convert numpy array to base64 encoded PNG string with memory management"""
     buffer = BytesIO()
     
-    # Save the image to the buffer as PNG
-    plt.figure(figsize=(10, 10))
-    plt.imshow(image_array, cmap='gray', vmin=0.0, vmax=1.0)
-    plt.axis('off')
-    plt.tight_layout(pad=0)
-    plt.savefig(buffer, format='png', bbox_inches='tight', pad_inches=0, dpi=100)
-    plt.close()
-    
-    # Get the PNG data and encode as base64
-    buffer.seek(0)
-    image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
-    buffer.close()
-    
-    return image_base64
+    try:
+        # Create figure with explicit memory management
+        fig = plt.figure(figsize=(10, 10))
+        plt.imshow(image_array, cmap='gray', vmin=0.0, vmax=1.0)
+        plt.axis('off')
+        plt.tight_layout(pad=0)
+        plt.savefig(buffer, format='png', bbox_inches='tight', pad_inches=0, dpi=100)
+        plt.close(fig)  # Explicitly close the figure
+        
+        # Get the PNG data and encode as base64
+        buffer.seek(0)
+        image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+        
+        return image_base64
+        
+    finally:
+        buffer.close()
+        plt.close('all')  # Close all matplotlib figures
+        gc.collect()  # Force garbage collection
 
 @app.get("/")
 async def root():
-    return {"message": "String Art API is running"}
+    return {"message": "String Art API is running", "status": "healthy"}
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {"status": "healthy", "timestamp": time()}
 
 @app.post("/generate-string-art")
 async def generate_string_art(
@@ -250,19 +260,10 @@ async def generate_string_art(
 ) -> Dict[str, Any]:
     """
     Generate string art from uploaded image with three contrast levels
-    
-    Parameters:
-    - file: Image file to process
-    - side_len: Output image side length (default: 300)
-    - export_strength: String drawing strength (default: 0.1)
-    - pull_amount: Maximum number of string pulls (default: None for auto)
-    - random_nails: Number of random nails to consider (default: None for all)
-    - radius1_multiplier: Horizontal radius multiplier (default: 1.0)
-    - radius2_multiplier: Vertical radius multiplier (default: 1.0)
-    - nail_step: Step size for nail placement (default: 4)
-    - wb: White on black mode (default: False)
-    - rect: Use rectangle nail pattern instead of circle (default: False)
     """
+    
+    request_id = str(uuid.uuid4())[:8]  # Short unique ID for this request
+    logger.info(f"[{request_id}] Starting string art generation")
     
     try:
         # Validate file type
@@ -271,6 +272,7 @@ async def generate_string_art(
         
         # Read uploaded image directly from memory
         contents = await file.read()
+        logger.info(f"[{request_id}] Image file read, size: {len(contents)} bytes")
         
         try:
             # Use PIL to read image from memory, then convert to numpy array
@@ -280,6 +282,7 @@ async def generate_string_art(
                 pil_image = pil_image.convert('RGB')
             # Convert to numpy array (0-255 range)
             img = np.array(pil_image)
+            logger.info(f"[{request_id}] Image processed, shape: {img.shape}")
             
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid image format: {str(e)}")
@@ -303,7 +306,7 @@ async def generate_string_art(
         else:
             nails = create_circle_nail_positions(shape, nail_step, radius1_multiplier, radius2_multiplier)
 
-        print(f"Nails amount: {len(nails)}")
+        logger.info(f"[{request_id}] Nails amount: {len(nails)}")
         
         # Convert to grayscale
         base_grayscale = rgb2gray(img) * 0.9
@@ -321,7 +324,7 @@ async def generate_string_art(
         
         # Process each contrast level
         for contrast_name, contrast_factor in contrast_levels.items():
-            print(f"\n=== Processing {contrast_name} contrast via API ===")
+            logger.info(f"[{request_id}] === Processing {contrast_name} contrast ===")
             
             # Apply contrast adjustment
             adjusted_grayscale = adjust_contrast(base_grayscale, contrast_factor)
@@ -334,8 +337,7 @@ async def generate_string_art(
                 radius2_multiplier=radius2_multiplier
             )
             
-            print(f"DEBUG: pull_order type: {type(pull_order)}, length: {len(pull_order) if pull_order else 0}")
-            print(f"DEBUG: first 10 pulls: {pull_order[:10] if pull_order else 'None'}")
+            logger.info(f"[{request_id}] Pull order length: {len(pull_order) if pull_order else 0}")
             
             # Convert result to base64
             image_base64 = numpy_to_base64(result)
@@ -349,13 +351,16 @@ async def generate_string_art(
                 "total_pulls": len(pull_order)
             }
             
-            print(f"Pull order for {contrast_name}: {pull_order_str[:100]}...")  # Show first 100 chars
+            logger.info(f"[{request_id}] Completed {contrast_name} contrast processing")
             
-            print(f"Completed {contrast_name} contrast processing")
+            # Clean up memory after each contrast level
+            del result, adjusted_grayscale
+            gc.collect()
         
-        return {
+        response_data = {
             "success": True,
             "message": "String art generated successfully",
+            "request_id": request_id,
             "results": results,
             "metadata": {
                 "nails_count": len(nails),
@@ -375,12 +380,31 @@ async def generate_string_art(
             }
         }
         
+        logger.info(f"[{request_id}] Returning successful response")
+        return JSONResponse(content=response_data, status_code=200)
+        
     except HTTPException:
+        logger.error(f"[{request_id}] HTTP exception occurred")
         raise
     except Exception as e:
-        print(f"Error processing image: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        error_msg = f"Internal server error: {str(e)}"
+        logger.error(f"[{request_id}] {error_msg}")
+        raise HTTPException(status_code=500, detail=error_msg)
+    
+    finally:
+        # Clean up memory
+        gc.collect()
+        logger.info(f"[{request_id}] Request processing completed")
+
+# Add a startup event to log server start
+@app.on_event("startup")
+async def startup_event():
+    logger.info("String Art API server started successfully")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("String Art API server shutting down")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
