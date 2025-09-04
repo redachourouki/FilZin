@@ -45,7 +45,7 @@ class JobStatus(str, Enum):
 # In-memory job storage (use Redis/DB in production)
 jobs_store: Dict[str, Dict] = {}
 
-# ============== ORIGINAL ALGORITHM CODE (UNCHANGED) ==============
+# ============== ORIGINAL ALGORITHM CODE (UPDATED) ==============
 
 def rgb2gray(rgb):
     return np.dot(rgb[...,:3], [0.2989, 0.5870, 0.1140])
@@ -74,15 +74,19 @@ def create_rectangle_nail_positions(shape, nail_step=2):
     nails = nails_top + nails_right + nails_bot + nails_left
     return np.array(nails)
 
-def create_circle_nail_positions(shape, nail_step=2, r1_multip=1, r2_multip=1):
+def create_circle_nail_positions(shape, nail_count=200, r1_multip=1, r2_multip=1):
     height = shape[0]
     width = shape[1]
     centre = (height // 2, width // 2)
     radius = min(height, width) // 2 - 1
-    rr, cc = ellipse_perimeter(centre[0], centre[1], int(radius*r1_multip), int(radius*r2_multip))
-    nails = list(set([(rr[i], cc[i]) for i in range(len(cc))]))
-    nails.sort(key=lambda c: atan2(c[0] - centre[0], c[1] - centre[1]))
-    nails = nails[::nail_step]
+    
+    nails = []
+    for i in range(nail_count):
+        angle = 2 * np.pi * i / nail_count
+        y = int(centre[0] + radius * r1_multip * np.sin(angle))
+        x = int(centre[1] + radius * r2_multip * np.cos(angle))
+        nails.append((y, x))
+    
     return np.asarray(nails)
 
 def init_canvas(shape, black=False):
@@ -247,13 +251,13 @@ def process_string_art_job(job_id: str, image_data: bytes, params: Dict[str, Any
 
         shape = (len(img), len(img[0]))
 
-        # Create nails
+        # UPDATED: Create nails with fixed 200 count for circles
         if params.get('rect', False):
             nails = create_rectangle_nail_positions(shape, params.get('nail_step', 4))
         else:
-            nails = create_circle_nail_positions(shape, params.get('nail_step', 4), 
-                                               params.get('radius1_multiplier', 1), 
-                                               params.get('radius2_multiplier', 1))
+            nails = create_circle_nail_positions(shape, nail_count=200,
+                                               r1_multip=params.get('radius1_multiplier', 1), 
+                                               r2_multip=params.get('radius2_multiplier', 1))
 
         logger.info(f"[{job_id}] Nails amount: {len(nails)}")
         
