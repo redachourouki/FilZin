@@ -45,6 +45,30 @@ class JobStatus(str, Enum):
 # In-memory job storage (use Redis/DB in production)
 jobs_store: Dict[str, Dict] = {}
 
+# ============== NAIL LABELING SYSTEM ==============
+
+def create_nail_labels(nail_count=200):
+    """Create sectioned nail labels: A1-A50, B1-B50, C1-C50, D1-D50"""
+    labels = []
+    sections = ['A', 'B', 'C', 'D']
+    nails_per_section = nail_count // 4  # 50 nails per section
+    
+    for section_idx, section in enumerate(sections):
+        for nail_num in range(1, nails_per_section + 1):
+            labels.append(f"{section}{nail_num}")
+    
+    return labels
+
+def index_to_label(index, nail_labels):
+    """Convert numeric index to nail label"""
+    if 0 <= index < len(nail_labels):
+        return nail_labels[index]
+    return str(index)  # fallback to number if out of range
+
+def pull_order_to_labels(pull_order, nail_labels):
+    """Convert numeric pull order to labeled pull order"""
+    return [index_to_label(idx, nail_labels) for idx in pull_order]
+
 # ============== ORIGINAL ALGORITHM CODE (UPDATED) ==============
 
 def rgb2gray(rgb):
@@ -251,15 +275,18 @@ def process_string_art_job(job_id: str, image_data: bytes, params: Dict[str, Any
 
         shape = (len(img), len(img[0]))
 
-        # UPDATED: Create nails with fixed 200 count for circles
+        # Create nails with fixed 200 count for circles
         if params.get('rect', False):
             nails = create_rectangle_nail_positions(shape, params.get('nail_step', 4))
+            nail_labels = [str(i) for i in range(len(nails))]  # Keep numeric for rectangles
         else:
             nails = create_circle_nail_positions(shape, nail_count=200,
                                                r1_multip=params.get('radius1_multiplier', 1), 
                                                r2_multip=params.get('radius2_multiplier', 1))
+            nail_labels = create_nail_labels(200)  # A1-A50, B1-B50, C1-C50, D1-D50
 
         logger.info(f"[{job_id}] Nails amount: {len(nails)}")
+        logger.info(f"[{job_id}] Nail labels: {nail_labels[:10]}...{nail_labels[-10:]}")  # Show first and last 10
         
         # Convert to grayscale
         base_grayscale = rgb2gray(img) * 0.9
@@ -295,11 +322,15 @@ def process_string_art_job(job_id: str, image_data: bytes, params: Dict[str, Any
             
             # Convert result to base64
             image_base64 = numpy_to_base64(result)
-            pull_order_str = "-".join([str(idx) for idx in pull_order]) if pull_order else ""
+            
+            # Convert pull order to labeled format
+            pull_order_labeled = pull_order_to_labels(pull_order, nail_labels)
+            pull_order_str = "-".join(pull_order_labeled) if pull_order_labeled else ""
             
             results[contrast_name] = {
                 "image_base64": image_base64,
                 "pull_order": pull_order_str,
+                "pull_order_numeric": "-".join([str(idx) for idx in pull_order]) if pull_order else "",  # Keep numeric version too
                 "total_pulls": len(pull_order)
             }
             
@@ -316,7 +347,9 @@ def process_string_art_job(job_id: str, image_data: bytes, params: Dict[str, Any
                 "nails_count": len(nails),
                 "image_dimensions": image_dimens,
                 "original_shape": shape,
-                "processing_params": params
+                "processing_params": params,
+                "nail_labels": nail_labels,  # Include nail labels in metadata
+                "nail_system": "sectioned" if not params.get('rect', False) else "numeric"
             }
         })
         
@@ -360,6 +393,9 @@ async def submit_job(
     """
     Submit a string art generation job
     Returns job_id immediately for polling
+    
+    Circle patterns use sectioned nail labels: A1-A50, B1-B50, C1-C50, D1-D50
+    Rectangle patterns use numeric labels: 0, 1, 2, ...
     """
     
     # Validate file type
@@ -405,7 +441,8 @@ async def submit_job(
             "job_id": job_id,
             "status": JobStatus.PENDING,
             "message": "Job submitted successfully. Use the job_id to check status.",
-            "estimated_time": "2-5 minutes"
+            "estimated_time": "2-5 minutes",
+            "nail_system": "Circle: A1-D50 sections, Rectangle: numeric"
         }
         
     except Exception as e:
@@ -474,14 +511,31 @@ async def delete_job(job_id: str):
     del jobs_store[job_id]
     return {"message": f"Job {job_id} deleted successfully"}
 
+@app.get("/nail-labels")
+async def get_nail_labels():
+    """Get the nail labeling system for reference"""
+    return {
+        "circle_nails": {
+            "total": 200,
+            "sections": {
+                "A": "A1 to A50 (nails 0-49)",
+                "B": "B1 to B50 (nails 50-99)", 
+                "C": "C1 to C50 (nails 100-149)",
+                "D": "D1 to D50 (nails 150-199)"
+            },
+            "sample_labels": create_nail_labels(200)[:20] + ["..."] + create_nail_labels(200)[-20:]
+        },
+        "rectangle_nails": "Uses numeric labels: 0, 1, 2, ... (variable count based on nail_step)"
+    }
+
 # Legacy endpoint for backwards compatibility (but with timeout warning)
 @app.post("/generate-string-art")
 async def generate_string_art_sync(
     file: UploadFile = File(...),
     side_len: int = 300,
     export_strength: float = 0.1,
-    pull_amount: Optional[int] = 1000,  # Reduced default for faster processing
-    random_nails: Optional[int] = 50,    # Reduced default for faster processing
+    pull_amount: Optional[int] = 1000,
+    random_nails: Optional[int] = 50,
     radius1_multiplier: float = 1.0,
     radius2_multiplier: float = 1.0,
     nail_step: int = 4,
@@ -501,7 +555,8 @@ async def generate_string_art_sync(
             "step_2": "GET /jobs/{job_id} - Poll this endpoint until status is 'completed'",
             "step_3": "The completed job will contain your results"
         },
-        "recommended_flow": "Submit job → Poll status → Get results"
+        "recommended_flow": "Submit job → Poll status → Get results",
+        "nail_system": "Circle patterns now use A1-D50 sectioned labels"
     }
 
 # Startup and shutdown events
@@ -512,6 +567,8 @@ async def startup_event():
     logger.info("  POST /jobs - Submit string art job")
     logger.info("  GET /jobs/{job_id} - Check job status")
     logger.info("  GET /jobs - List all jobs")
+    logger.info("  GET /nail-labels - View nail labeling system")
+    logger.info("Nail system: Circle patterns use A1-D50 sections, rectangles use numeric")
 
 @app.on_event("shutdown")
 async def shutdown_event():
