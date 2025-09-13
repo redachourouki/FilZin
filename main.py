@@ -652,7 +652,7 @@ async def startup_event():
     logger.info("String Art API server started successfully")
     logger.info("Now generating 10 variants per job!")
     logger.info("Available endpoints:")
-    logger.info("  POST /jobs - Submit string art job (10 variants)")
+    logger.info("  POST /jobs - Submit string art job (7 variants)")
     logger.info("  GET /jobs/{job_id} - Check job status")
     logger.info("  GET /jobs - List all jobs")
     logger.info("  GET /variants - View variant information")
