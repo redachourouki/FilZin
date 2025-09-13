@@ -82,9 +82,6 @@ def adjust_brightness(image, brightness_factor):
     adjusted = image + brightness_factor
     return np.clip(adjusted, 0, 1)
 
-def apply_gamma_correction(image, gamma):
-    return np.power(image, gamma)
-
 def largest_square(image: np.ndarray) -> np.ndarray:
     short_edge = np.argmin(image.shape[:2])
     short_edge_half = image.shape[short_edge] // 2
@@ -298,47 +295,35 @@ def process_string_art_job(job_id: str, image_data: bytes, params: Dict[str, Any
         # Convert to grayscale
         base_grayscale = rgb2gray(img) * 0.9
         
-        # Define 10 different variants with various processing techniques
+        # Define EXACTLY 7 variants with lower contrast levels (medium as maximum)
         variants = {
-            'ultra_low_contrast': {
-                'process': lambda img: adjust_contrast(img, 0.3),
-                'description': 'Ultra low contrast for subtle details'
+            'ultra_soft': {
+                'process': lambda img: adjust_contrast(img, 0.25),
+                'description': 'Very subtle details'
+            },
+            'very_low': {
+                'process': lambda img: adjust_contrast(img, 0.35),
+                'description': 'Gentle appearance'
             },
             'low_contrast': {
-                'process': lambda img: adjust_contrast(img, 0.5),
-                'description': 'Low contrast for soft appearance'
+                'process': lambda img: adjust_contrast(img, 0.45),
+                'description': 'Soft look'
             },
             'low_bright': {
-                'process': lambda img: adjust_brightness(adjust_contrast(img, 0.6), -0.1),
-                'description': 'Low contrast with reduced brightness'
+                'process': lambda img: adjust_brightness(adjust_contrast(img, 0.5), -0.05),
+                'description': 'Enhanced softness'
+            },
+            'medium_low': {
+                'process': lambda img: adjust_contrast(img, 0.6),
+                'description': 'Balanced softness'
             },
             'medium_soft': {
-                'process': lambda img: adjust_contrast(img, 0.65),
-                'description': 'Medium-soft contrast'
+                'process': lambda img: adjust_contrast(img, 0.7),
+                'description': 'Refined details'
             },
             'medium': {
                 'process': lambda img: adjust_contrast(img, 0.75),
-                'description': 'Medium contrast (balanced)'
-            },
-            'medium_bright': {
-                'process': lambda img: adjust_brightness(adjust_contrast(img, 0.75), 0.05),
-                'description': 'Medium contrast with slight brightness boost'
-            },
-            'high': {
-                'process': lambda img: adjust_contrast(img, 0.87),
-                'description': 'High contrast for sharp details'
-            },
-            'high_gamma': {
-                'process': lambda img: apply_gamma_correction(adjust_contrast(img, 0.87), 1.2),
-                'description': 'High contrast with gamma correction'
-            },
-            'ultra_high': {
-                'process': lambda img: adjust_contrast(img, 1.0),
-                'description': 'Ultra high contrast for maximum definition'
-            },
-            'extreme': {
-                'process': lambda img: adjust_brightness(adjust_contrast(img, 1.1), 0.02),
-                'description': 'Extreme processing for dramatic effect'
+                'description': 'Maximum level - balanced and clear'
             }
         }
         
@@ -350,7 +335,7 @@ def process_string_art_job(job_id: str, image_data: bytes, params: Dict[str, Any
         
         # Process each variant
         for i, (variant_name, variant_config) in enumerate(variants.items(), 1):
-            logger.info(f"[{job_id}] Processing variant {i}/10: {variant_name}")
+            logger.info(f"[{job_id}] Processing variant {i}/7: {variant_name}")
             
             # Apply the variant's image processing
             processed_grayscale = variant_config['process'](base_grayscale)
@@ -397,12 +382,12 @@ def process_string_art_job(job_id: str, image_data: bytes, params: Dict[str, Any
                 "processing_params": params,
                 "nail_labels": nail_labels,  # Include nail labels in metadata
                 "nail_system": "sectioned" if not params.get('rect', False) else "numeric",
-                "total_variants": 10,
+                "total_variants": 7,
                 "variant_names": list(variants.keys())
             }
         })
         
-        logger.info(f"[{job_id}] Job completed successfully with 10 variants")
+        logger.info(f"[{job_id}] Job completed successfully with 7 variants")
         
     except Exception as e:
         logger.error(f"[{job_id}] Job failed: {str(e)}")
@@ -419,11 +404,11 @@ def process_string_art_job(job_id: str, image_data: bytes, params: Dict[str, Any
 
 @app.get("/")
 async def root():
-    return {"message": "String Art API is running", "status": "healthy", "variants": 10}
+    return {"message": "String Art API is running", "status": "healthy", "variants": 7}
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": time(), "active_jobs": len(jobs_store), "variants_per_job": 10}
+    return {"status": "healthy", "timestamp": time(), "active_jobs": len(jobs_store), "variants_per_job": 7}
 
 @app.post("/jobs")
 async def submit_job(
@@ -440,20 +425,17 @@ async def submit_job(
     rect: bool = False
 ):
     """
-    Submit a string art generation job - Now generates 10 variants!
+    Submit a string art generation job - Generates exactly 7 variants!
     Returns job_id immediately for polling
     
-    Variants include:
-    1. Ultra Low Contrast - Subtle details
-    2. Low Contrast - Soft appearance  
-    3. Low Bright - Low contrast with reduced brightness
-    4. Medium Soft - Medium-soft contrast
-    5. Medium - Balanced contrast
-    6. Medium Bright - Medium contrast with brightness boost
-    7. High - Sharp details
-    8. High Gamma - High contrast with gamma correction
-    9. Ultra High - Maximum definition
-    10. Extreme - Dramatic effect
+    7 Variants (lower contrast focus, medium as maximum):
+    1. Ultra Soft (0.25 contrast) - Very subtle details
+    2. Very Low (0.35 contrast) - Gentle appearance  
+    3. Low Contrast (0.45 contrast) - Soft look
+    4. Low Bright (0.5 contrast + brightness reduction) - Enhanced softness
+    5. Medium Low (0.6 contrast) - Balanced softness
+    6. Medium Soft (0.7 contrast) - Refined details
+    7. Medium (0.75 contrast) - Maximum level - balanced and clear
     
     Circle patterns use sectioned nail labels: A1-A50, B1-B50, C1-C50, D1-D50
     Rectangle patterns use numeric labels: 0, 1, 2, ...
@@ -501,9 +483,9 @@ async def submit_job(
         return {
             "job_id": job_id,
             "status": JobStatus.PENDING,
-            "message": "Job submitted successfully. Will generate 10 variants with different processing styles.",
-            "estimated_time": "5-10 minutes (10 variants)",
-            "variants_count": 10,
+            "message": "Job submitted successfully. Will generate exactly 7 variants with optimized lower contrast processing.",
+            "estimated_time": "3-7 minutes (7 variants)",
+            "variants_count": 7,
             "nail_system": "Circle: A1-D50 sections, Rectangle: numeric"
         }
         
@@ -515,7 +497,7 @@ async def submit_job(
 async def get_job_status(job_id: str):
     """
     Check the status of a string art generation job
-    Returns 10 variants when completed
+    Returns exactly 7 variants when completed
     """
     
     if job_id not in jobs_store:
@@ -547,8 +529,8 @@ async def get_job_status(job_id: str):
             "status": job["status"],
             "created_at": job["created_at"],
             "started_at": job.get("started_at"),
-            "message": "Job is processing 10 variants. Please check again in a few seconds.",
-            "expected_variants": 10
+            "message": "Job is processing 7 variants. Please check again in a few seconds.",
+            "expected_variants": 7
         }
 
 @app.get("/jobs")
@@ -579,22 +561,21 @@ async def delete_job(job_id: str):
 
 @app.get("/variants")
 async def get_variant_info():
-    """Get information about the 10 variants generated"""
+    """Get information about the exactly 7 variants generated"""
     return {
-        "total_variants": 10,
+        "total_variants": 7,
+        "contrast_philosophy": "Focused on lower contrast levels for optimal string art results",
+        "max_contrast_level": "medium (0.75)",
         "variants": {
-            "ultra_low_contrast": "Ultra low contrast for subtle details",
-            "low_contrast": "Low contrast for soft appearance",
-            "low_bright": "Low contrast with reduced brightness", 
-            "medium_soft": "Medium-soft contrast",
-            "medium": "Medium contrast (balanced)",
-            "medium_bright": "Medium contrast with slight brightness boost",
-            "high": "High contrast for sharp details",
-            "high_gamma": "High contrast with gamma correction",
-            "ultra_high": "Ultra high contrast for maximum definition",
-            "extreme": "Extreme processing for dramatic effect"
+            "ultra_soft": "Ultra Soft (0.25 contrast) - Very subtle details",
+            "very_low": "Very Low (0.35 contrast) - Gentle appearance",
+            "low_contrast": "Low Contrast (0.45 contrast) - Soft look",
+            "low_bright": "Low Bright (0.5 contrast + brightness reduction) - Enhanced softness", 
+            "medium_low": "Medium Low (0.6 contrast) - Balanced softness",
+            "medium_soft": "Medium Soft (0.7 contrast) - Refined details",
+            "medium": "Medium (0.75 contrast) - Maximum level - balanced and clear"
         },
-        "processing_note": "Each variant uses different contrast, brightness, and gamma adjustments"
+        "processing_note": "All variants use contrast levels from 0.25 to 0.75 for optimal string art results"
     }
 
 @app.get("/nail-labels")
@@ -639,10 +620,10 @@ async def generate_string_art_sync(
         "instructions": {
             "step_1": "POST /jobs - Submit your job and get a job_id",
             "step_2": "GET /jobs/{job_id} - Poll this endpoint until status is 'completed'",
-            "step_3": "The completed job will contain 10 variants in your results"
+            "step_3": "The completed job will contain exactly 7 variants in your results"
         },
-        "recommended_flow": "Submit job → Poll status → Get 10 variants",
-        "variants_count": 10,
+        "recommended_flow": "Submit job → Poll status → Get 7 variants",
+        "variants_count": 7,
         "nail_system": "Circle patterns now use A1-D50 sectioned labels"
     }
 
@@ -650,7 +631,8 @@ async def generate_string_art_sync(
 @app.on_event("startup")
 async def startup_event():
     logger.info("String Art API server started successfully")
-    logger.info("Now generating 10 variants per job!")
+    logger.info("Now generating exactly 7 optimized variants per job!")
+    logger.info("Focus: Lower contrast levels (0.25-0.75) for best string art results")
     logger.info("Available endpoints:")
     logger.info("  POST /jobs - Submit string art job (7 variants)")
     logger.info("  GET /jobs/{job_id} - Check job status")
