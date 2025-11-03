@@ -3,3 +3,6 @@ cmd = "python -m uvicorn main:app --host 0.0.0.0 --port $PORT"
 
 [variables]
 PYTHONPATH = "/app"
+
+[phases.setup]
+providers = ["python"]
