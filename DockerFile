@@ -27,5 +27,12 @@ RUN mkdir -p /app/temp
 # Expose port 8000
 EXPOSE 8000
 
-# Command to run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# =============================
+# Environment variable to choose which app to run
+# Default = main:app (production mode)
+# You can override this in Railway → Variables (APP_MODULE = mainmed:app)
+# =============================
+ENV APP_MODULE=main:app
+
+# Start the FastAPI app using Uvicorn with the selected module
+CMD ["sh", "-c", "uvicorn $APP_MODULE --host 0.0.0.0 --port 8000"]
