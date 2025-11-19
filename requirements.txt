@@ -6,3 +6,5 @@ matplotlib
 scikit-image
 Pillow
 aiofiles
+opencv-python-headless
+scipy
