@@ -457,6 +457,6 @@ async def get_job(job_id: str):
 async def health():
     return {"status": "healthy", "active_jobs": len(jobs_store)}
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
