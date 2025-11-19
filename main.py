@@ -1,8 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
-import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from skimage.draw import line_aa
 from skimage.transform import resize
@@ -17,15 +15,13 @@ from enum import Enum
 import gc
 import logging
 from datetime import datetime
-
+import base64
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-app = FastAPI(title="String Art API - Enhanced", description="Professional-grade string art generation")
-
+app = FastAPI(title="String Art API - Production Ready", description="Professional string art generation")
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,680 +31,406 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 class JobStatus(str, Enum):
     PENDING = "pending"
-    PROCESSING = "processing" 
+    PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
 
-
 jobs_store: Dict[str, Dict] = {}
 
-
-# ============== NAIL LABELING SYSTEM ==============
-
+# ============== NAIL LABELING ==============
 
 def create_nail_labels(nail_count=200):
-    """Create sectioned nail labels: A1-A50, B1-B50, C1-C50, D1-D50"""
     labels = []
     sections = ['A', 'B', 'C', 'D']
-    nails_per_section = nail_count // 4
-    
-    for section_idx, section in enumerate(sections):
-        for nail_num in range(1, nails_per_section + 1):
-            labels.append(f"{section}{nail_num}")
-    
+    per_section = nail_count // 4
+    for section in sections:
+        for i in range(1, per_section + 1):
+            labels.append(f"{section}{i}")
     return labels
 
+def pull_order_to_labels(order, labels):
+    return [labels[i] if 0 <= i < len(labels) else str(i) for i in order]
 
-def index_to_label(index, nail_labels):
-    """Convert numeric index to nail label"""
-    if 0 <= index < len(nail_labels):
-        return nail_labels[index]
-    return str(index)
-
-
-def pull_order_to_labels(pull_order, nail_labels):
-    """Convert numeric pull order to labeled pull order"""
-    return [index_to_label(idx, nail_labels) for idx in pull_order]
-
-
-# ============== ENHANCED IMAGE PROCESSING ==============
-
+# ============== IMAGE PROCESSING ==============
 
 def rgb2gray(rgb):
-    """Convert RGB to grayscale using standard weights"""
     return np.dot(rgb[...,:3], [0.2989, 0.5870, 0.1140])
 
+def largest_center_square(img: np.ndarray) -> np.ndarray:
+    h, w = img.shape[:2]
+    size = min(h, w)
+    top = (h - size) // 2
+    left = (w - size) // 2
+    return img[top:top + size, left:left + size]
 
-def gentle_contrast_enhancement(image, factor=1.15):
+def gentle_preprocessing(img: np.ndarray) -> np.ndarray:
     """
-    Gentle contrast enhancement - much more subtle than before
-    Professional string art needs GENTLE preprocessing, not aggressive
+    BALANCED preprocessing - not too aggressive, not too weak
+    This is the key to good results!
     """
-    mean_val = np.mean(image)
-    adjusted = (image - mean_val) * factor + mean_val
-    return np.clip(adjusted, 0, 1)
-
-
-def adaptive_histogram_equalization(image, clip_limit=0.01):
-    """
-    CLAHE with very gentle clipping for subtle enhancement
-    """
-    # Convert to uint8 for CLAHE
-    img_uint8 = (image * 255).astype(np.uint8)
-    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8,8))
-    enhanced = clahe.apply(img_uint8)
-    return enhanced.astype(np.float64) / 255.0
-
-
-def bilateral_filter_smooth(image, d=5, sigma_color=0.03, sigma_space=5):
-    """
-    Bilateral filtering to preserve edges while smoothing
-    Much gentler than before - this is KEY for portraits
-    """
-    img_uint8 = (image * 255).astype(np.uint8)
-    filtered = cv2.bilateralFilter(img_uint8, d, sigma_color * 255, sigma_space)
-    return filtered.astype(np.float64) / 255.0
-
-
-def downsample_for_perception(image, downsample_factor=2):
-    """
-    Downsample to simulate human visual blurring
-    CRITICAL: This simulates how humans perceive string art from a distance
-    """
-    if downsample_factor <= 1:
-        return image
+    # Light gaussian smoothing to reduce noise
+    smoothed = gaussian_filter(img, sigma=0.6)
     
-    # Resize down
-    new_shape = (image.shape[0] // downsample_factor, 
-                 image.shape[1] // downsample_factor)
-    downsampled = resize(image, new_shape, anti_aliasing=True)
+    # Very gentle contrast boost
+    mean = np.mean(smoothed)
+    contrasted = (smoothed - mean) * 1.15 + mean
+    contrasted = np.clip(contrasted, 0, 1)
     
-    # Resize back up to original size for algorithm
-    return resize(downsampled, image.shape, anti_aliasing=False)
-
-
-def preprocess_portrait(image):
-    """
-    Professional portrait preprocessing pipeline
-    Based on research: GENTLE is better than AGGRESSIVE
-    """
-    # Step 1: Bilateral filtering to smooth while preserving edges
-    smoothed = bilateral_filter_smooth(image, d=5, sigma_color=0.03, sigma_space=5)
+    # Slight darkening to make strings more visible
+    result = contrasted * 0.88
     
-    # Step 2: Very gentle CLAHE
-    enhanced = adaptive_histogram_equalization(smoothed, clip_limit=0.01)
-    
-    # Step 3: Subtle contrast boost (much less than before!)
-    contrasted = gentle_contrast_enhancement(enhanced, factor=1.10)
-    
-    # Step 4: Downsample to simulate perception blur
-    perception_blurred = downsample_for_perception(contrasted, downsample_factor=2)
-    
-    # Step 5: Final gentle gaussian blur
-    final = gaussian_filter(perception_blurred, sigma=0.5)
-    
-    return np.clip(final, 0, 1)
-
-
-def preprocess_general(image):
-    """
-    General image preprocessing - still gentle
-    """
-    # Gentle smoothing
-    smoothed = gaussian_filter(image, sigma=0.7)
-    
-    # Subtle contrast
-    contrasted = gentle_contrast_enhancement(smoothed, factor=1.12)
-    
-    # Perception blur
-    perception_blurred = downsample_for_perception(contrasted, downsample_factor=2)
-    
-    return np.clip(perception_blurred, 0, 1)
-
-
-def largest_square(image: np.ndarray) -> np.ndarray:
-    """Extract largest square from image"""
-    short_edge = np.argmin(image.shape[:2])
-    short_edge_half = image.shape[short_edge] // 2
-    long_edge_center = image.shape[1 - short_edge] // 2
-    if short_edge == 0:
-        return image[:, long_edge_center - short_edge_half:
-                        long_edge_center + short_edge_half]
-    if short_edge == 1:
-        return image[long_edge_center - short_edge_half:
-                     long_edge_center + short_edge_half, :]
-
+    return np.clip(result, 0, 1)
 
 # ============== NAIL POSITIONING ==============
 
-
-def create_circle_nail_positions(shape, nail_count=200, r1_multip=1, r2_multip=1):
-    """Create circular nail positions"""
-    height = shape[0]
-    width = shape[1]
-    centre = (height // 2, width // 2)
-    radius = min(height, width) // 2 - 1
+def create_circle_nails(shape, nail_count=200):
+    """Create nail positions with proper boundary checking"""
+    h, w = shape
+    cy, cx = h // 2, w // 2
+    # Use 95% of radius to ensure nails stay inside
+    radius = int(min(h, w) * 0.475)
     
     nails = []
     for i in range(nail_count):
         angle = 2 * np.pi * i / nail_count
-        y = int(centre[0] + radius * r1_multip * np.sin(angle))
-        x = int(centre[1] + radius * r2_multip * np.cos(angle))
+        y = int(cy + radius * np.sin(angle))
+        x = int(cx + radius * np.cos(angle))
+        # Clamp to valid range
+        y = max(0, min(h - 1, y))
+        x = max(0, min(w - 1, x))
         nails.append((y, x))
     
-    return np.asarray(nails)
+    return np.array(nails, dtype=np.int32)
 
+# ============== CORE ALGORITHM ==============
 
-def init_canvas(shape, black=False):
-    """Initialize canvas"""
-    if black:
-        return np.zeros(shape)
-    else:
-        return np.ones(shape)
-
-
-def get_aa_line(from_pos, to_pos, str_strength, picture):
-    """Get anti-aliased line with given strength"""
-    rr, cc, val = line_aa(from_pos[0], from_pos[1], to_pos[0], to_pos[1])
-    line = picture[rr, cc] + str_strength * val
-    line = np.clip(line, a_min=0, a_max=1)
-    return line, rr, cc
-
-
-# ============== ENHANCED CORE ALGORITHM ==============
-
-
-def find_best_nail_position_fearless(current_position, nails, str_pic, orig_pic, 
-                                      str_strength, random_nails=None):
-    """
-    FEARLESS error calculation - KEY IMPROVEMENT from research!
+def draw_line_safe(canvas, p0, p1, strength):
+    """Draw line with boundary checking"""
+    h, w = canvas.shape
+    rr, cc, val = line_aa(p0[0], p0[1], p1[0], p1[1])
     
-    Only penalize if the line makes things WORSE
-    Don't penalize if it makes things BETTER (even if it temporarily worsens other areas)
+    # Keep only valid pixels
+    mask = (rr >= 0) & (rr < h) & (cc >= 0) & (cc < w)
+    rr, cc, val = rr[mask], cc[mask], val[mask]
     
-    This allows the algorithm to be "fearless" - it can temporarily mess up areas
-    knowing that future strings will fix them
-    """
-    best_cumulative_improvement = -99999
-    best_nail_position = None
-    best_nail_idx = None
+    if len(rr) == 0:
+        return None
     
-    if random_nails is not None:
-        nail_ids = np.random.choice(range(len(nails)), size=random_nails, replace=False)
-        nails_and_ids = list(zip(nail_ids, nails[nail_ids]))
-    else:
-        nails_and_ids = enumerate(nails)
+    canvas[rr, cc] = np.clip(canvas[rr, cc] + val * strength, 0.0, 1.0)
+    return rr, cc, val
 
-    for nail_idx, nail_position in nails_and_ids:
-        # Get the proposed line
-        overlayed_line, rr, cc = get_aa_line(current_position, nail_position, str_strength, str_pic)
-        
-        # Calculate pixel-wise improvement
-        before_diff = np.abs(str_pic[rr, cc] - orig_pic[rr, cc])
-        after_diff = np.abs(overlayed_line - orig_pic[rr, cc])
-        
-        # FEARLESS: Only count pixels that IMPROVE
-        # This is the key insight from Michael Crum's research
-        pixel_improvements = before_diff - after_diff
-        
-        # Only sum positive improvements (pixels that got better)
-        # Ignore pixels that got worse (they'll be fixed later)
-        positive_improvements = np.maximum(pixel_improvements, 0)
-        cumulative_improvement = np.sum(positive_improvements)
-
-        if cumulative_improvement >= best_cumulative_improvement:
-            best_cumulative_improvement = cumulative_improvement
-            best_nail_position = nail_position
-            best_nail_idx = nail_idx
-
-    return best_nail_idx, best_nail_position, best_cumulative_improvement
-
-
-def create_art_enhanced(nails, orig_pic, str_pic, str_strength, 
-                       min_iterations=6000, max_iterations=15000, 
-                       max_fails=10, random_nails=None):
-    """
-    ENHANCED string art algorithm with:
-    1. Much lighter string strength (0.01-0.02 instead of 0.05)
-    2. Fearless error calculation
-    3. Minimum iteration requirement (6000+)
-    4. Extended failure tolerance (10 consecutive fails)
-    5. Better stopping conditions
+def calc_improvement(canvas, target, p0, p1, strength):
+    """Calculate how much a line would improve the image"""
+    h, w = canvas.shape
+    rr, cc, val = line_aa(p0[0], p0[1], p1[0], p1[1])
     
-    Based on research from:
-    - Michael Crum's string art generator
-    - Birsak et al. "String Art: Towards Computational Fabrication"
-    - Various academic papers on greedy optimization
+    # Boundary check
+    mask = (rr >= 0) & (rr < h) & (cc >= 0) & (cc < w)
+    rr, cc, val = rr[mask], cc[mask], val[mask]
+    
+    if len(rr) == 0:
+        return -1.0, None
+    
+    # Calculate improvement in squared error
+    before = (canvas[rr, cc] - target[rr, cc]) ** 2
+    after_pixels = np.clip(canvas[rr, cc] + val * strength, 0.0, 1.0)
+    after = (after_pixels - target[rr, cc]) ** 2
+    
+    improvement = np.sum(before - after)
+    return float(improvement), (rr, cc, val)
+
+def greedy_string_art(nails, target, max_iterations=3000, strength=-0.025, 
+                     random_sample=80, fail_limit=8):
     """
-    start = time()
+    BALANCED greedy algorithm:
+    - Not too slow (3000 iterations max)
+    - Not too fast (quality suffers)
+    - Smart candidate sampling
+    - Escape from local minima
+    """
+    h, w = target.shape
+    canvas = np.ones((h, w), dtype=np.float32)
+    
+    current_idx = 0
+    order = [0]
+    fails = 0
+    n_nails = len(nails)
+    
+    start_time = time()
     iter_times = []
-    current_position = nails[0]
-    pull_order = [0]
-    i = 0
-    consecutive_fails = 0
-    last_improvement = 0
     
-    logger.info(f"Starting enhanced algorithm with min_iterations={min_iterations}, max_iterations={max_iterations}")
-    logger.info(f"String strength: {str_strength}")
-    
-    while True:
-        start_iter = time()
-        i += 1
+    for iteration in range(max_iterations):
+        iter_start = time()
         
-        if i % 500 == 0:
-            logger.info(f"Iteration {i} - Total pulls: {len(pull_order)} - Consecutive fails: {consecutive_fails}")
+        if iteration % 500 == 0:
+            logger.info(f"  Iteration {iteration}, Pulls: {len(order)}, Fails: {fails}")
         
-        # Stopping conditions
-        if i >= max_iterations:
-            logger.info(f"Reached maximum iterations: {max_iterations}")
-            break
-            
-        if i >= min_iterations and consecutive_fails >= max_fails:
-            logger.info(f"Reached minimum iterations ({min_iterations}) and {consecutive_fails} consecutive fails")
-            break
-
-        # Find best nail with FEARLESS error calculation
-        idx, best_nail_position, best_cumulative_improvement = find_best_nail_position_fearless(
-            current_position, nails, str_pic, orig_pic, str_strength, random_nails
+        # Sample random candidates (much faster than checking all 200)
+        candidates = np.random.choice(
+            [i for i in range(n_nails) if i != current_idx],
+            size=min(random_sample, n_nails - 1),
+            replace=False
         )
-
-        # Check if we found an improvement
-        if best_cumulative_improvement <= 0:
-            consecutive_fails += 1
-            continue
         
-        # Reset consecutive fails counter
-        consecutive_fails = 0
+        best_improvement = -1e9
+        best_idx = None
+        best_data = None
         
-        # Apply the string
-        pull_order.append(idx)
-        best_overlayed_line, rr, cc = get_aa_line(current_position, best_nail_position, str_strength, str_pic)
-        str_pic[rr, cc] = best_overlayed_line
-        current_position = best_nail_position
-        last_improvement = best_cumulative_improvement
+        # Find best candidate
+        for cand_idx in candidates:
+            imp, data = calc_improvement(
+                canvas, target, nails[current_idx], nails[cand_idx], strength
+            )
+            if imp > best_improvement:
+                best_improvement = imp
+                best_idx = cand_idx
+                best_data = data
         
-        iter_times.append(time() - start_iter)
-
-    logger.info(f"Algorithm completed!")
-    logger.info(f"Total time: {time() - start:.2f}s")
-    logger.info(f"Total pulls: {len(pull_order)}")
-    logger.info(f"Average iteration time: {np.mean(iter_times) if iter_times else 0:.4f}s")
+        # Apply best move or escape
+        if best_improvement <= 0:
+            fails += 1
+            if fails >= fail_limit:
+                break
+            # Escape: jump to a random far nail
+            far_candidates = [i for i in range(n_nails) 
+                            if abs(i - current_idx) > n_nails // 8]
+            if far_candidates:
+                jump_idx = np.random.choice(far_candidates)
+                draw_line_safe(canvas, nails[current_idx], nails[jump_idx], strength)
+                current_idx = jump_idx
+                order.append(current_idx)
+        else:
+            # Apply the good move
+            fails = 0
+            rr, cc, val = best_data
+            canvas[rr, cc] = np.clip(canvas[rr, cc] + val * strength, 0.0, 1.0)
+            current_idx = best_idx
+            order.append(current_idx)
+        
+        iter_times.append(time() - iter_start)
     
-    return pull_order
-
-
-def scale_nails(x_ratio, y_ratio, nails):
-    """Scale nail positions"""
-    return [(int(y_ratio*nail[0]), int(x_ratio*nail[1])) for nail in nails]
-
-
-def pull_order_to_array_bw(order, canvas, nails, strength):
-    """Render pull order to array"""
-    for pull_start, pull_end in zip(order, order[1:]):
-        rr, cc, val = line_aa(nails[pull_start][0], nails[pull_start][1],
-                              nails[pull_end][0], nails[pull_end][1])
-        canvas[rr, cc] += val * strength
-    return np.clip(canvas, a_min=0, a_max=1)
-
-
-def process_single_variant(orig_pic, nails, shape, variant_name, image_dimens, 
-                          wb=False, export_strength=0.08, random_nails=None,
-                          radius1_multiplier=1, radius2_multiplier=1):
-    """Process a single variant with enhanced algorithm"""
-    logger.info(f"=== Processing {variant_name} variant (ENHANCED) ===")
+    elapsed = time() - start_time
+    logger.info(f"  Completed: {len(order)} pulls in {elapsed:.1f}s (avg {np.mean(iter_times):.4f}s/iter)")
     
-    if wb:
-        # White string on black background
-        str_pic = init_canvas(shape, black=True)
-        # CRITICAL: Much lighter string strength!
-        pull_order = create_art_enhanced(
-            nails, orig_pic, str_pic, 
-            str_strength=0.015,  # Was 0.05, now 0.015
-            min_iterations=6000,
-            max_iterations=15000,
-            max_fails=10,
-            random_nails=random_nails
-        )
-        blank = init_canvas(image_dimens, black=True)
-    else:
-        # Black string on white background  
-        str_pic = init_canvas(shape, black=False)
-        # CRITICAL: Much lighter string strength!
-        pull_order = create_art_enhanced(
-            nails, orig_pic, str_pic,
-            str_strength=-0.015,  # Was -0.05, now -0.015
-            min_iterations=6000,
-            max_iterations=15000,
-            max_fails=10,
-            random_nails=random_nails
-        )
-        blank = init_canvas(image_dimens, black=False)
+    return canvas, order
 
-    scaled_nails = scale_nails(
-        image_dimens[1] / shape[1],
-        image_dimens[0] / shape[0],
-        nails
-    )
+# ============== RENDERING ==============
 
-    result = pull_order_to_array_bw(
-        pull_order,
-        blank,
-        scaled_nails,
-        export_strength if wb else -export_strength
-    )
+def array_to_base64(img_array: np.ndarray) -> str:
+    """Convert array to base64 PNG"""
+    fig = plt.figure(figsize=(8, 8), frameon=False)
+    ax = plt.Axes(fig, [0., 0., 1., 1.])
+    ax.set_axis_off()
+    fig.add_axes(ax)
+    ax.imshow(img_array, cmap='gray', vmin=0.0, vmax=1.0)
     
-    return result, pull_order
-
-
-def numpy_to_base64(image_array):
-    """Convert numpy array to base64 encoded PNG"""
-    buffer = BytesIO()
+    buf = BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0, dpi=150)
+    plt.close(fig)
     
+    buf.seek(0)
+    b64 = base64.b64encode(buf.read()).decode('utf-8')
+    buf.close()
+    gc.collect()
+    
+    return b64
+
+# ============== JOB PROCESSING ==============
+
+def process_job(job_id: str, image_data: bytes, params: Dict[str, Any]):
     try:
-        fig = plt.figure(figsize=(10, 10))
-        plt.imshow(image_array, cmap='gray', vmin=0.0, vmax=1.0)
-        plt.axis('off')
-        plt.tight_layout(pad=0)
-        plt.savefig(buffer, format='png', bbox_inches='tight', pad_inches=0, dpi=100)
-        plt.close(fig)
-        
-        buffer.seek(0)
-        import base64
-        image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
-        return image_base64
-        
-    finally:
-        buffer.close()
-        plt.close('all')
-        gc.collect()
-
-
-# ============== ASYNC JOB PROCESSING ==============
-
-
-def process_string_art_job(job_id: str, image_data: bytes, params: Dict[str, Any]):
-    """Background task to process string art generation with ENHANCED algorithm"""
-    try:
-        logger.info(f"[{job_id}] Starting ENHANCED processing")
+        logger.info(f"[{job_id}] Starting job")
         jobs_store[job_id]["status"] = JobStatus.PROCESSING
         jobs_store[job_id]["started_at"] = datetime.now().isoformat()
         
         # Load image
-        pil_image = Image.open(BytesIO(image_data))
-        if pil_image.mode != 'RGB':
-            pil_image = pil_image.convert('RGB')
-        img = np.array(pil_image)
+        pil = Image.open(BytesIO(image_data)).convert("RGB")
+        img = np.array(pil, dtype=np.float32)
+        if img.max() > 1.0:
+            img = img / 255.0
         
-        if np.any(img > 100):
-            img = img / 255
+        # Preprocessing
+        gray = rgb2gray(img)
+        gray = largest_center_square(gray)
         
-        LONG_SIDE = 300
+        # Resize to working size
+        work_size = int(params.get("work_size", 300))
+        gray_resized = resize(gray, (work_size, work_size), anti_aliasing=True)
         
-        img = largest_square(img)
-        img = resize(img, (LONG_SIDE, LONG_SIDE))
-        shape = (len(img), len(img[0]))
-
-        # Create nails (200 for circles)
-        nails = create_circle_nail_positions(shape, nail_count=200,
-                                           r1_multip=params.get('radius1_multiplier', 1), 
-                                           r2_multip=params.get('radius2_multiplier', 1))
-        nail_labels = create_nail_labels(200)
-
-        logger.info(f"[{job_id}] Nails: {len(nails)}")
+        # Create nails
+        nail_count = int(params.get("nail_count", 200))
+        nails = create_circle_nails(gray_resized.shape, nail_count)
+        labels = create_nail_labels(nail_count)
         
-        # Convert to grayscale
-        base_grayscale = rgb2gray(img)
+        logger.info(f"[{job_id}] Image: {work_size}x{work_size}, Nails: {nail_count}")
         
-        # Define 3 professional preprocessing variants
-        # CRITICAL: All variants use GENTLE preprocessing now!
+        # Process 3 variants with different preprocessing
         variants = {
-            'portrait_optimized': {
-                'process': lambda img: preprocess_portrait(img * 0.92),
-                'description': 'Professional portrait preset - bilateral filtering + gentle CLAHE',
-                'export_strength': 0.08
+            'soft': {
+                'preprocess': lambda x: gentle_preprocessing(x),
+                'strength': -0.020,
+                'iters': 2500,
+                'desc': 'Soft and smooth'
             },
-            'general_balanced': {
-                'process': lambda img: preprocess_general(img * 0.90),
-                'description': 'General images - gentle smoothing + subtle contrast',
-                'export_strength': 0.08
+            'balanced': {
+                'preprocess': lambda x: gentle_preprocessing(x) * 0.95,
+                'strength': -0.025,
+                'iters': 3000,
+                'desc': 'Balanced quality (recommended)'
             },
-            'minimal_processing': {
-                'process': lambda img: gaussian_filter(img * 0.88, sigma=0.8),
-                'description': 'Minimal preprocessing - just gentle blur',
-                'export_strength': 0.08
+            'detailed': {
+                'preprocess': lambda x: gentle_preprocessing(x) * 0.90,
+                'strength': -0.030,
+                'iters': 3500,
+                'desc': 'More detail and contrast'
             }
         }
         
-        side_len = params.get('side_len', 300)
-        image_dimens = (int(side_len * params.get('radius1_multiplier', 1)), 
-                       int(side_len * params.get('radius2_multiplier', 1)))
-        
         results = {}
         
-        # Process each variant
-        for i, (variant_name, variant_config) in enumerate(variants.items(), 1):
-            logger.info(f"[{job_id}] Processing variant {i}/3: {variant_name}")
+        for i, (name, config) in enumerate(variants.items(), 1):
+            logger.info(f"[{job_id}] Processing variant {i}/3: {name}")
             
-            # Apply preprocessing
-            processed_grayscale = variant_config['process'](base_grayscale)
+            # Preprocess
+            processed = config['preprocess'](gray_resized)
             
-            result, pull_order = process_single_variant(
-                processed_grayscale, nails, shape, variant_name, image_dimens,
-                wb=params.get('wb', False), 
-                export_strength=variant_config['export_strength'],
-                random_nails=params.get('random_nails'),
-                radius1_multiplier=params.get('radius1_multiplier', 1),
-                radius2_multiplier=params.get('radius2_multiplier', 1)
+            # Run algorithm
+            canvas, order = greedy_string_art(
+                nails, processed,
+                max_iterations=config['iters'],
+                strength=config['strength'],
+                random_sample=params.get("random_sample", 80),
+                fail_limit=params.get("fail_limit", 8)
             )
             
+            # Render at export size
+            export_size = int(params.get("export_size", 600))
+            if export_size != work_size:
+                canvas_resized = resize(canvas, (export_size, export_size), anti_aliasing=True)
+            else:
+                canvas_resized = canvas
+            
             # Convert to base64
-            image_base64 = numpy_to_base64(result)
+            b64 = array_to_base64(canvas_resized)
             
-            # Convert pull order to labels
-            pull_order_labeled = pull_order_to_labels(pull_order, nail_labels)
-            pull_order_str = "-".join(pull_order_labeled) if pull_order_labeled else ""
+            # Create labeled order
+            order_labeled = pull_order_to_labels(order, labels)
             
-            results[variant_name] = {
-                "image_base64": image_base64,
-                "pull_order": pull_order_str,
-                "pull_order_numeric": "-".join([str(idx) for idx in pull_order]) if pull_order else "",
-                "total_pulls": len(pull_order),
-                "description": variant_config['description'],
+            results[name] = {
+                "image_base64": b64,
+                "pull_order": "-".join(order_labeled),
+                "pull_order_numeric": "-".join(str(x) for x in order),
+                "total_pulls": len(order),
+                "description": config['desc'],
                 "variant_number": i
             }
             
-            # Clean up
-            del result, processed_grayscale
+            del canvas, processed
             gc.collect()
         
-        # Update job with results
+        # Complete job
         jobs_store[job_id].update({
             "status": JobStatus.COMPLETED,
             "completed_at": datetime.now().isoformat(),
             "results": results,
             "metadata": {
-                "nails_count": len(nails),
-                "image_dimensions": image_dimens,
-                "original_shape": shape,
-                "processing_params": params,
-                "nail_labels": nail_labels,
-                "nail_system": "sectioned (A1-D50)",
-                "total_variants": 3,
-                "variant_names": list(variants.keys()),
-                "algorithm_version": "enhanced_v2_professional",
-                "key_improvements": [
-                    "Fearless error calculation",
-                    "Much lighter string strength (0.015 vs 0.05)",
-                    "Minimum 6000 iterations",
-                    "Extended failure tolerance (10 fails)",
-                    "Gentle preprocessing (bilateral + CLAHE)",
-                    "Perception downsampling"
-                ]
+                "nails_count": nail_count,
+                "work_size": work_size,
+                "export_size": params.get("export_size", 600),
+                "nail_labels": labels,
+                "variants": 3
             }
         })
         
-        logger.info(f"[{job_id}] ENHANCED Job completed with 3 professional variants")
+        logger.info(f"[{job_id}] SUCCESS - 3 variants completed")
         
     except Exception as e:
-        logger.error(f"[{job_id}] Job failed: {str(e)}")
+        logger.exception(f"[{job_id}] FAILED: {e}")
         jobs_store[job_id].update({
             "status": JobStatus.FAILED,
             "error": str(e),
             "failed_at": datetime.now().isoformat()
         })
-    
     finally:
         gc.collect()
 
-
 # ============== API ENDPOINTS ==============
-
 
 @app.get("/")
 async def root():
     return {
-        "message": "ENHANCED String Art API - Professional Grade",
+        "message": "String Art API - Production Ready v3.0",
         "status": "healthy",
-        "version": "2.0",
         "variants": 3,
-        "improvements": [
-            "Fearless error calculation",
-            "6000-15000 iterations",
-            "Lighter string strength (0.015)",
-            "Gentle preprocessing",
-            "Professional quality output"
+        "features": [
+            "Balanced quality and speed",
+            "Smart boundary checking",
+            "Reliable 3-5 minute processing",
+            "3 quality variants"
         ]
     }
-
 
 @app.post("/jobs")
 async def submit_job(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    side_len: int = 300,
-    random_nails: Optional[int] = None,
-    wb: bool = False
+    work_size: int = 300,
+    export_size: int = 600,
+    nail_count: int = 200,
+    random_sample: int = 80,
+    fail_limit: int = 8
 ):
     """
-    Submit ENHANCED string art generation job
+    Submit string art job - returns 3 variants:
+    1. Soft - 2500 iterations, gentle
+    2. Balanced - 3000 iterations, recommended
+    3. Detailed - 3500 iterations, more contrast
     
-    Returns 3 professional variants:
-    1. Portrait Optimized - Bilateral filtering + gentle CLAHE
-    2. General Balanced - Gentle smoothing + subtle contrast  
-    3. Minimal Processing - Just gentle blur
-    
-    All use ENHANCED algorithm with:
-    - Fearless error calculation
-    - Light string strength (0.015)
-    - 6000-15000 iterations
-    - 10 consecutive fail tolerance
+    Processing time: 3-5 minutes total
     """
-    
-    if not file.content_type.startswith('image/'):
-        raise HTTPException(status_code=400, detail="File must be an image")
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(400, "File must be an image")
     
     job_id = str(uuid.uuid4())
+    image_data = await file.read()
     
-    try:
-        image_data = await file.read()
-        
-        params = {
-            "side_len": side_len,
-            "random_nails": random_nails,
-            "wb": wb,
-            "radius1_multiplier": 1.0,
-            "radius2_multiplier": 1.0
-        }
-        
-        jobs_store[job_id] = {
-            "job_id": job_id,
-            "status": JobStatus.PENDING,
-            "created_at": datetime.now().isoformat(),
-            "filename": file.filename,
-            "file_size": len(image_data),
-            "params": params
-        }
-        
-        background_tasks.add_task(process_string_art_job, job_id, image_data, params)
-        
-        logger.info(f"[{job_id}] ENHANCED job submitted")
-        
-        return {
-            "job_id": job_id,
-            "status": JobStatus.PENDING,
-            "message": "ENHANCED job submitted - will generate 3 professional variants",
-            "estimated_time": "10-20 minutes (6000-15000 iterations per variant)",
-            "variants_count": 3,
-            "algorithm": "enhanced_v2_professional"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error submitting job: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to submit job: {str(e)}")
-
-
-@app.get("/jobs/{job_id}")
-async def get_job_status(job_id: str):
-    """Check job status"""
-    if job_id not in jobs_store:
-        raise HTTPException(status_code=404, detail="Job not found")
+    params = {
+        "work_size": work_size,
+        "export_size": export_size,
+        "nail_count": nail_count,
+        "random_sample": random_sample,
+        "fail_limit": fail_limit
+    }
     
-    job = jobs_store[job_id]
+    jobs_store[job_id] = {
+        "job_id": job_id,
+        "status": JobStatus.PENDING,
+        "created_at": datetime.now().isoformat(),
+        "filename": file.filename,
+        "params": params
+    }
     
-    if job["status"] == JobStatus.COMPLETED:
-        return {
-            "job_id": job_id,
-            "status": job["status"],
-            "completed_at": job.get("completed_at"),
-            "results": job["results"],
-            "metadata": job["metadata"],
-            "variants_count": len(job["results"])
-        }
-    elif job["status"] == JobStatus.FAILED:
-        return {
-            "job_id": job_id,
-            "status": job["status"],
-            "error": job.get("error"),
-            "failed_at": job.get("failed_at")
-        }
-    else:
-        return {
-            "job_id": job_id,
-            "status": job["status"],
-            "created_at": job["created_at"],
-            "started_at": job.get("started_at"),
-            "message": "Processing with ENHANCED algorithm (6000-15000 iterations)",
-            "expected_variants": 3
-        }
-
-
-@app.get("/health")
-async def health_check():
+    background_tasks.add_task(process_job, job_id, image_data, params)
+    
     return {
-        "status": "healthy",
-        "version": "2.0_enhanced",
-        "algorithm": "fearless_greedy_with_perception_blur",
-        "active_jobs": len(jobs_store)
+        "job_id": job_id,
+        "status": "pending",
+        "message": "Job queued - will generate 3 variants",
+        "estimated_time": "3-5 minutes",
+        "variants": 3
     }
 
+@app.get("/jobs/{job_id}")
+async def get_job(job_id: str):
+    if job_id not in jobs_store:
+        raise HTTPException(404, "Job not found")
+    return jobs_store[job_id]
 
-@app.on_event("startup")
-async def startup_event():
-    logger.info("=" * 70)
-    logger.info("ENHANCED String Art API v2.0 - Professional Grade")
-    logger.info("=" * 70)
-    logger.info("Key Improvements:")
-    logger.info("  ✓ Fearless error calculation (only penalize negative improvements)")
-    logger.info("  ✓ Much lighter string strength (0.015 vs 0.05)")
-    logger.info("  ✓ Minimum 6000 iterations, max 15000")
-    logger.info("  ✓ Extended failure tolerance (10 consecutive fails)")
-    logger.info("  ✓ Gentle preprocessing (bilateral + CLAHE)")
-    logger.info("  ✓ Perception downsampling for human-like blurring")
-    logger.info("=" * 70)
-
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "active_jobs": len(jobs_store)}
 
 if __name__ == "__main__":
     import uvicorn
