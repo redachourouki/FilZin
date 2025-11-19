@@ -19,7 +19,7 @@ import base64
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(_name_)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="String Art API - RingString Quality", description="Commercial-grade dense string art")
 
@@ -412,7 +412,7 @@ async def submit_job(
     2. Dark - 9,000 iterations, dark (0.73), strong strings (RECOMMENDED)
     3. Balanced - 8,000 iterations, medium-dark (0.76), balanced
     
-    ⚠ WARNING: Processing time is 10-15 minutes total!
+    ⚠️ WARNING: Processing time is 10-15 minutes total!
     This produces commercial-quality results like RingString.
     """
     if not file.content_type.startswith("image/"):
