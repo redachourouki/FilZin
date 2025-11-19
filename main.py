@@ -21,7 +21,7 @@ import base64
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="String Art API - Production Ready", description="Professional string art generation")
+app = FastAPI(title="String Art API - Detailed Focus", description="High-detail string art generation")
 
 app.add_middleware(
     CORSMiddleware,
@@ -65,21 +65,48 @@ def largest_center_square(img: np.ndarray) -> np.ndarray:
     left = (w - size) // 2
     return img[top:top + size, left:left + size]
 
-def gentle_preprocessing(img: np.ndarray) -> np.ndarray:
-    """
-    BALANCED preprocessing - not too aggressive, not too weak
-    This is the key to good results!
-    """
-    # Light gaussian smoothing to reduce noise
-    smoothed = gaussian_filter(img, sigma=0.6)
+def detailed_preprocessing_v1(img: np.ndarray) -> np.ndarray:
+    """Shade 1: Strong detail with deep shadows"""
+    # Light smoothing
+    smoothed = gaussian_filter(img, sigma=0.5)
     
-    # Very gentle contrast boost
+    # Moderate contrast boost
     mean = np.mean(smoothed)
-    contrasted = (smoothed - mean) * 1.15 + mean
+    contrasted = (smoothed - mean) * 1.25 + mean
     contrasted = np.clip(contrasted, 0, 1)
     
-    # Slight darkening to make strings more visible
+    # Darken for deep shadows (makes strings pop more)
+    result = contrasted * 0.85
+    
+    return np.clip(result, 0, 1)
+
+def detailed_preprocessing_v2(img: np.ndarray) -> np.ndarray:
+    """Shade 2: Balanced detail with medium contrast"""
+    # Light smoothing
+    smoothed = gaussian_filter(img, sigma=0.5)
+    
+    # Balanced contrast
+    mean = np.mean(smoothed)
+    contrasted = (smoothed - mean) * 1.20 + mean
+    contrasted = np.clip(contrasted, 0, 1)
+    
+    # Medium darkening
     result = contrasted * 0.88
+    
+    return np.clip(result, 0, 1)
+
+def detailed_preprocessing_v3(img: np.ndarray) -> np.ndarray:
+    """Shade 3: Softer detail with lighter tones"""
+    # Slightly more smoothing for softer look
+    smoothed = gaussian_filter(img, sigma=0.6)
+    
+    # Gentle contrast
+    mean = np.mean(smoothed)
+    contrasted = (smoothed - mean) * 1.18 + mean
+    contrasted = np.clip(contrasted, 0, 1)
+    
+    # Light darkening (brighter overall)
+    result = contrasted * 0.90
     
     return np.clip(result, 0, 1)
 
@@ -141,14 +168,10 @@ def calc_improvement(canvas, target, p0, p1, strength):
     improvement = np.sum(before - after)
     return float(improvement), (rr, cc, val)
 
-def greedy_string_art(nails, target, max_iterations=3000, strength=-0.025, 
-                     random_sample=80, fail_limit=8):
+def greedy_string_art(nails, target, max_iterations=4000, strength=-0.030, 
+                     random_sample=80, fail_limit=10):
     """
-    BALANCED greedy algorithm:
-    - Not too slow (3000 iterations max)
-    - Not too fast (quality suffers)
-    - Smart candidate sampling
-    - Escape from local minima
+    HIGH DETAIL greedy algorithm with more iterations
     """
     h, w = target.shape
     canvas = np.ones((h, w), dtype=np.float32)
@@ -167,7 +190,7 @@ def greedy_string_art(nails, target, max_iterations=3000, strength=-0.025,
         if iteration % 500 == 0:
             logger.info(f"  Iteration {iteration}, Pulls: {len(order)}, Fails: {fails}")
         
-        # Sample random candidates (much faster than checking all 200)
+        # Sample random candidates
         candidates = np.random.choice(
             [i for i in range(n_nails) if i != current_idx],
             size=min(random_sample, n_nails - 1),
@@ -241,7 +264,7 @@ def array_to_base64(img_array: np.ndarray) -> str:
 
 def process_job(job_id: str, image_data: bytes, params: Dict[str, Any]):
     try:
-        logger.info(f"[{job_id}] Starting job")
+        logger.info(f"[{job_id}] Starting HIGH DETAIL job")
         jobs_store[job_id]["status"] = JobStatus.PROCESSING
         jobs_store[job_id]["started_at"] = datetime.now().isoformat()
         
@@ -266,43 +289,43 @@ def process_job(job_id: str, image_data: bytes, params: Dict[str, Any]):
         
         logger.info(f"[{job_id}] Image: {work_size}x{work_size}, Nails: {nail_count}")
         
-        # Process 3 variants with different preprocessing
+        # Process 3 DETAILED variants with different shades
         variants = {
-            'soft': {
-                'preprocess': lambda x: gentle_preprocessing(x),
-                'strength': -0.020,
-                'iters': 2500,
-                'desc': 'Soft and smooth'
+            'detailed_deep': {
+                'preprocess': detailed_preprocessing_v1,
+                'strength': -0.032,
+                'iters': 4000,
+                'desc': 'Deep shadows - strongest detail (DARKEST)'
             },
-            'balanced': {
-                'preprocess': lambda x: gentle_preprocessing(x) * 0.95,
-                'strength': -0.025,
-                'iters': 3000,
-                'desc': 'Balanced quality (recommended)'
-            },
-            'detailed': {
-                'preprocess': lambda x: gentle_preprocessing(x) * 0.90,
+            'detailed_balanced': {
+                'preprocess': detailed_preprocessing_v2,
                 'strength': -0.030,
-                'iters': 3500,
-                'desc': 'More detail and contrast'
+                'iters': 4200,
+                'desc': 'Balanced detail - recommended (MEDIUM)'
+            },
+            'detailed_bright': {
+                'preprocess': detailed_preprocessing_v3,
+                'strength': -0.028,
+                'iters': 4500,
+                'desc': 'Lighter tones - softer detail (BRIGHTEST)'
             }
         }
         
         results = {}
         
         for i, (name, config) in enumerate(variants.items(), 1):
-            logger.info(f"[{job_id}] Processing variant {i}/3: {name}")
+            logger.info(f"[{job_id}] Processing DETAILED variant {i}/3: {name}")
             
             # Preprocess
             processed = config['preprocess'](gray_resized)
             
-            # Run algorithm
+            # Run algorithm with MORE ITERATIONS for detail
             canvas, order = greedy_string_art(
                 nails, processed,
                 max_iterations=config['iters'],
                 strength=config['strength'],
                 random_sample=params.get("random_sample", 80),
-                fail_limit=params.get("fail_limit", 8)
+                fail_limit=params.get("fail_limit", 10)
             )
             
             # Render at export size
@@ -340,11 +363,12 @@ def process_job(job_id: str, image_data: bytes, params: Dict[str, Any]):
                 "work_size": work_size,
                 "export_size": params.get("export_size", 600),
                 "nail_labels": labels,
-                "variants": 3
+                "variants": 3,
+                "focus": "HIGH DETAIL ONLY - 3 shades"
             }
         })
         
-        logger.info(f"[{job_id}] SUCCESS - 3 variants completed")
+        logger.info(f"[{job_id}] SUCCESS - 3 DETAILED variants completed")
         
     except Exception as e:
         logger.exception(f"[{job_id}] FAILED: {e}")
@@ -361,14 +385,15 @@ def process_job(job_id: str, image_data: bytes, params: Dict[str, Any]):
 @app.get("/")
 async def root():
     return {
-        "message": "String Art API - Production Ready v3.0",
+        "message": "String Art API - HIGH DETAIL FOCUS",
         "status": "healthy",
         "variants": 3,
+        "focus": "Detailed only - 3 different shades",
         "features": [
-            "Balanced quality and speed",
-            "Smart boundary checking",
-            "Reliable 3-5 minute processing",
-            "3 quality variants"
+            "4000-4500 iterations per variant",
+            "Deep shadows, balanced, and bright versions",
+            "Maximum detail and clarity",
+            "5-7 minute processing time"
         ]
     }
 
@@ -380,15 +405,16 @@ async def submit_job(
     export_size: int = 600,
     nail_count: int = 200,
     random_sample: int = 80,
-    fail_limit: int = 8
+    fail_limit: int = 10
 ):
     """
-    Submit string art job - returns 3 variants:
-    1. Soft - 2500 iterations, gentle
-    2. Balanced - 3000 iterations, recommended
-    3. Detailed - 3500 iterations, more contrast
+    Submit HIGH DETAIL string art job - returns 3 detailed variants:
     
-    Processing time: 3-5 minutes total
+    1. Detailed Deep - 4000 iterations, darkest, strongest contrast
+    2. Detailed Balanced - 4200 iterations, medium tones (RECOMMENDED)
+    3. Detailed Bright - 4500 iterations, lighter, softer
+    
+    Processing time: 5-7 minutes total
     """
     if not file.content_type.startswith("image/"):
         raise HTTPException(400, "File must be an image")
@@ -417,9 +443,10 @@ async def submit_job(
     return {
         "job_id": job_id,
         "status": "pending",
-        "message": "Job queued - will generate 3 variants",
-        "estimated_time": "3-5 minutes",
-        "variants": 3
+        "message": "Job queued - will generate 3 DETAILED variants",
+        "estimated_time": "5-7 minutes",
+        "variants": 3,
+        "detail_level": "HIGH - focused on maximum quality"
     }
 
 @app.get("/jobs/{job_id}")
