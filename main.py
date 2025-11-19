@@ -21,7 +21,7 @@ import base64
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="String Art API - Detailed Focus", description="High-detail string art generation")
+app = FastAPI(title="String Art API - RingString Quality", description="Commercial-grade dense string art")
 
 app.add_middleware(
     CORSMiddleware,
@@ -65,48 +65,52 @@ def largest_center_square(img: np.ndarray) -> np.ndarray:
     left = (w - size) // 2
     return img[top:top + size, left:left + size]
 
-def detailed_preprocessing_v1(img: np.ndarray) -> np.ndarray:
-    """Shade 1: Strong detail with deep shadows"""
-    # Light smoothing
-    smoothed = gaussian_filter(img, sigma=0.5)
+def ringstring_preprocessing_extreme(img: np.ndarray) -> np.ndarray:
+    """
+    RINGSTRING-STYLE: Very dark, high contrast
+    This is the KEY to getting their look!
+    """
+    # Very light smoothing
+    smoothed = gaussian_filter(img, sigma=0.4)
     
-    # Moderate contrast boost
+    # STRONG contrast boost (RingString uses aggressive contrast)
     mean = np.mean(smoothed)
-    contrasted = (smoothed - mean) * 1.25 + mean
+    contrasted = (smoothed - mean) * 1.40 + mean
     contrasted = np.clip(contrasted, 0, 1)
     
-    # Darken for deep shadows (makes strings pop more)
-    result = contrasted * 0.85
+    # DEEP darkening - this is critical!
+    # RingString makes the target VERY dark so strings show up strongly
+    result = contrasted * 0.70  # Much darker than before!
     
     return np.clip(result, 0, 1)
 
-def detailed_preprocessing_v2(img: np.ndarray) -> np.ndarray:
-    """Shade 2: Balanced detail with medium contrast"""
-    # Light smoothing
-    smoothed = gaussian_filter(img, sigma=0.5)
+def ringstring_preprocessing_dark(img: np.ndarray) -> np.ndarray:
+    """
+    RINGSTRING-STYLE: Dark but slightly less extreme
+    """
+    smoothed = gaussian_filter(img, sigma=0.4)
     
-    # Balanced contrast
     mean = np.mean(smoothed)
-    contrasted = (smoothed - mean) * 1.20 + mean
+    contrasted = (smoothed - mean) * 1.35 + mean
     contrasted = np.clip(contrasted, 0, 1)
     
-    # Medium darkening
-    result = contrasted * 0.88
+    # Dark
+    result = contrasted * 0.73
     
     return np.clip(result, 0, 1)
 
-def detailed_preprocessing_v3(img: np.ndarray) -> np.ndarray:
-    """Shade 3: Softer detail with lighter tones"""
-    # Slightly more smoothing for softer look
-    smoothed = gaussian_filter(img, sigma=0.6)
+def ringstring_preprocessing_balanced(img: np.ndarray) -> np.ndarray:
+    """
+    RINGSTRING-STYLE: Still dark but more balanced
+    """
+    smoothed = gaussian_filter(img, sigma=0.5)
     
-    # Gentle contrast
     mean = np.mean(smoothed)
-    contrasted = (smoothed - mean) * 1.18 + mean
+    contrasted = (smoothed - mean) * 1.30 + mean
     contrasted = np.clip(contrasted, 0, 1)
     
-    # Light darkening (brighter overall)
-    result = contrasted * 0.90
+    # Medium-dark
+    result = contrasted * 0.76
     
     return np.clip(result, 0, 1)
 
@@ -116,7 +120,6 @@ def create_circle_nails(shape, nail_count=200):
     """Create nail positions with proper boundary checking"""
     h, w = shape
     cy, cx = h // 2, w // 2
-    # Use 95% of radius to ensure nails stay inside
     radius = int(min(h, w) * 0.475)
     
     nails = []
@@ -124,7 +127,6 @@ def create_circle_nails(shape, nail_count=200):
         angle = 2 * np.pi * i / nail_count
         y = int(cy + radius * np.sin(angle))
         x = int(cx + radius * np.cos(angle))
-        # Clamp to valid range
         y = max(0, min(h - 1, y))
         x = max(0, min(w - 1, x))
         nails.append((y, x))
@@ -138,7 +140,6 @@ def draw_line_safe(canvas, p0, p1, strength):
     h, w = canvas.shape
     rr, cc, val = line_aa(p0[0], p0[1], p1[0], p1[1])
     
-    # Keep only valid pixels
     mask = (rr >= 0) & (rr < h) & (cc >= 0) & (cc < w)
     rr, cc, val = rr[mask], cc[mask], val[mask]
     
@@ -153,14 +154,12 @@ def calc_improvement(canvas, target, p0, p1, strength):
     h, w = canvas.shape
     rr, cc, val = line_aa(p0[0], p0[1], p1[0], p1[1])
     
-    # Boundary check
     mask = (rr >= 0) & (rr < h) & (cc >= 0) & (cc < w)
     rr, cc, val = rr[mask], cc[mask], val[mask]
     
     if len(rr) == 0:
         return -1.0, None
     
-    # Calculate improvement in squared error
     before = (canvas[rr, cc] - target[rr, cc]) ** 2
     after_pixels = np.clip(canvas[rr, cc] + val * strength, 0.0, 1.0)
     after = (after_pixels - target[rr, cc]) ** 2
@@ -168,10 +167,11 @@ def calc_improvement(canvas, target, p0, p1, strength):
     improvement = np.sum(before - after)
     return float(improvement), (rr, cc, val)
 
-def greedy_string_art(nails, target, max_iterations=4000, strength=-0.030, 
-                     random_sample=80, fail_limit=10):
+def greedy_string_art_intense(nails, target, max_iterations=10000, strength=-0.038, 
+                              random_sample=100, fail_limit=15):
     """
-    HIGH DETAIL greedy algorithm with more iterations
+    RINGSTRING-STYLE: INTENSE algorithm with MANY iterations
+    This will take 10-15 minutes but produces commercial quality!
     """
     h, w = target.shape
     canvas = np.ones((h, w), dtype=np.float32)
@@ -187,10 +187,10 @@ def greedy_string_art(nails, target, max_iterations=4000, strength=-0.030,
     for iteration in range(max_iterations):
         iter_start = time()
         
-        if iteration % 500 == 0:
+        if iteration % 1000 == 0:
             logger.info(f"  Iteration {iteration}, Pulls: {len(order)}, Fails: {fails}")
         
-        # Sample random candidates
+        # Sample MORE candidates for better quality
         candidates = np.random.choice(
             [i for i in range(n_nails) if i != current_idx],
             size=min(random_sample, n_nails - 1),
@@ -201,7 +201,6 @@ def greedy_string_art(nails, target, max_iterations=4000, strength=-0.030,
         best_idx = None
         best_data = None
         
-        # Find best candidate
         for cand_idx in candidates:
             imp, data = calc_improvement(
                 canvas, target, nails[current_idx], nails[cand_idx], strength
@@ -211,12 +210,11 @@ def greedy_string_art(nails, target, max_iterations=4000, strength=-0.030,
                 best_idx = cand_idx
                 best_data = data
         
-        # Apply best move or escape
         if best_improvement <= 0:
             fails += 1
             if fails >= fail_limit:
                 break
-            # Escape: jump to a random far nail
+            # Escape
             far_candidates = [i for i in range(n_nails) 
                             if abs(i - current_idx) > n_nails // 8]
             if far_candidates:
@@ -225,7 +223,6 @@ def greedy_string_art(nails, target, max_iterations=4000, strength=-0.030,
                 current_idx = jump_idx
                 order.append(current_idx)
         else:
-            # Apply the good move
             fails = 0
             rr, cc, val = best_data
             canvas[rr, cc] = np.clip(canvas[rr, cc] + val * strength, 0.0, 1.0)
@@ -264,7 +261,7 @@ def array_to_base64(img_array: np.ndarray) -> str:
 
 def process_job(job_id: str, image_data: bytes, params: Dict[str, Any]):
     try:
-        logger.info(f"[{job_id}] Starting HIGH DETAIL job")
+        logger.info(f"[{job_id}] Starting RINGSTRING-QUALITY job")
         jobs_store[job_id]["status"] = JobStatus.PROCESSING
         jobs_store[job_id]["started_at"] = datetime.now().isoformat()
         
@@ -288,44 +285,46 @@ def process_job(job_id: str, image_data: bytes, params: Dict[str, Any]):
         labels = create_nail_labels(nail_count)
         
         logger.info(f"[{job_id}] Image: {work_size}x{work_size}, Nails: {nail_count}")
+        logger.info(f"[{job_id}] WARNING: RINGSTRING quality = 10-15 min processing time!")
         
-        # Process 3 DETAILED variants with different shades
+        # Process 3 RINGSTRING-QUALITY variants
         variants = {
-            'detailed_deep': {
-                'preprocess': detailed_preprocessing_v1,
-                'strength': -0.032,
-                'iters': 4000,
-                'desc': 'Deep shadows - strongest detail (DARKEST)'
+            'ringstring_extreme': {
+                'preprocess': ringstring_preprocessing_extreme,
+                'strength': -0.040,
+                'iters': 10000,
+                'desc': 'EXTREME darkness - maximum density (like RingString!)'
             },
-            'detailed_balanced': {
-                'preprocess': detailed_preprocessing_v2,
-                'strength': -0.030,
-                'iters': 4200,
-                'desc': 'Balanced detail - recommended (MEDIUM)'
+            'ringstring_dark': {
+                'preprocess': ringstring_preprocessing_dark,
+                'strength': -0.038,
+                'iters': 9000,
+                'desc': 'Very dark - commercial quality (RECOMMENDED)'
             },
-            'detailed_bright': {
-                'preprocess': detailed_preprocessing_v3,
-                'strength': -0.028,
-                'iters': 4500,
-                'desc': 'Lighter tones - softer detail (BRIGHTEST)'
+            'ringstring_balanced': {
+                'preprocess': ringstring_preprocessing_balanced,
+                'strength': -0.036,
+                'iters': 8000,
+                'desc': 'Dark balanced - high quality'
             }
         }
         
         results = {}
         
         for i, (name, config) in enumerate(variants.items(), 1):
-            logger.info(f"[{job_id}] Processing DETAILED variant {i}/3: {name}")
+            logger.info(f"[{job_id}] Processing RINGSTRING variant {i}/3: {name}")
+            logger.info(f"[{job_id}] This will take 4-6 minutes...")
             
-            # Preprocess
+            # Preprocess with DARK settings
             processed = config['preprocess'](gray_resized)
             
-            # Run algorithm with MORE ITERATIONS for detail
-            canvas, order = greedy_string_art(
+            # Run algorithm with MANY iterations for density
+            canvas, order = greedy_string_art_intense(
                 nails, processed,
                 max_iterations=config['iters'],
                 strength=config['strength'],
-                random_sample=params.get("random_sample", 80),
-                fail_limit=params.get("fail_limit", 10)
+                random_sample=100,  # More candidates = better quality
+                fail_limit=15  # More patience = more strings
             )
             
             # Render at export size
@@ -364,11 +363,11 @@ def process_job(job_id: str, image_data: bytes, params: Dict[str, Any]):
                 "export_size": params.get("export_size", 600),
                 "nail_labels": labels,
                 "variants": 3,
-                "focus": "HIGH DETAIL ONLY - 3 shades"
+                "quality": "RINGSTRING-LEVEL - Commercial grade"
             }
         })
         
-        logger.info(f"[{job_id}] SUCCESS - 3 DETAILED variants completed")
+        logger.info(f"[{job_id}] SUCCESS - 3 RINGSTRING-QUALITY variants completed")
         
     except Exception as e:
         logger.exception(f"[{job_id}] FAILED: {e}")
@@ -385,15 +384,16 @@ def process_job(job_id: str, image_data: bytes, params: Dict[str, Any]):
 @app.get("/")
 async def root():
     return {
-        "message": "String Art API - HIGH DETAIL FOCUS",
+        "message": "String Art API - RINGSTRING QUALITY MODE",
         "status": "healthy",
         "variants": 3,
-        "focus": "Detailed only - 3 different shades",
+        "quality": "Commercial-grade like RingString",
+        "warning": "Processing takes 10-15 minutes (8k-10k iterations per variant)",
         "features": [
-            "4000-4500 iterations per variant",
-            "Deep shadows, balanced, and bright versions",
-            "Maximum detail and clarity",
-            "5-7 minute processing time"
+            "8,000-10,000 iterations per variant",
+            "Very dark preprocessing (0.70-0.76 darkness)",
+            "Strong string strength (-0.036 to -0.040)",
+            "Dense, professional results"
         ]
     }
 
@@ -403,18 +403,17 @@ async def submit_job(
     file: UploadFile = File(...),
     work_size: int = 300,
     export_size: int = 600,
-    nail_count: int = 200,
-    random_sample: int = 80,
-    fail_limit: int = 10
+    nail_count: int = 200
 ):
     """
-    Submit HIGH DETAIL string art job - returns 3 detailed variants:
+    Submit RINGSTRING-QUALITY job - returns 3 variants:
     
-    1. Detailed Deep - 4000 iterations, darkest, strongest contrast
-    2. Detailed Balanced - 4200 iterations, medium tones (RECOMMENDED)
-    3. Detailed Bright - 4500 iterations, lighter, softer
+    1. Extreme - 10,000 iterations, VERY dark (0.70), strongest strings
+    2. Dark - 9,000 iterations, dark (0.73), strong strings (RECOMMENDED)
+    3. Balanced - 8,000 iterations, medium-dark (0.76), balanced
     
-    Processing time: 5-7 minutes total
+    ⚠️ WARNING: Processing time is 10-15 minutes total!
+    This produces commercial-quality results like RingString.
     """
     if not file.content_type.startswith("image/"):
         raise HTTPException(400, "File must be an image")
@@ -425,9 +424,7 @@ async def submit_job(
     params = {
         "work_size": work_size,
         "export_size": export_size,
-        "nail_count": nail_count,
-        "random_sample": random_sample,
-        "fail_limit": fail_limit
+        "nail_count": nail_count
     }
     
     jobs_store[job_id] = {
@@ -443,10 +440,11 @@ async def submit_job(
     return {
         "job_id": job_id,
         "status": "pending",
-        "message": "Job queued - will generate 3 DETAILED variants",
-        "estimated_time": "5-7 minutes",
+        "message": "Job queued - RINGSTRING QUALITY MODE",
+        "estimated_time": "10-15 minutes",
         "variants": 3,
-        "detail_level": "HIGH - focused on maximum quality"
+        "quality_level": "Commercial-grade (8k-10k iterations)",
+        "warning": "This will take longer but produces professional results!"
     }
 
 @app.get("/jobs/{job_id}")
